@@ -12,11 +12,11 @@ if errorlevel 1 (
 py -3 -m pip install --upgrade pyinstaller
 if errorlevel 1 goto build_failed
 
-py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name GlyphIndex main.py
+py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name EctypeCharmap main.py
 if errorlevel 1 goto build_failed
 
 echo.
-echo Build complete: dist\GlyphIndex.exe
+echo Build complete: dist\EctypeCharmap.exe
 pause
 exit /b 0
 

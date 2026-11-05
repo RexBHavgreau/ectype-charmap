@@ -1,4 +1,4 @@
-name: Build Windows executable
+name: Build Ectype Charmap for Windows
 
 on:
   push:
@@ -24,11 +24,11 @@ jobs:
         run: python -m pip install --upgrade pip pyinstaller
 
       - name: Build executable
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name GlyphIndex main.py
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name EctypeCharmap main.py
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: glyph-index-windows
-          path: dist/GlyphIndex.exe
+          name: ectype-charmap-windows
+          path: dist/EctypeCharmap.exe
           if-no-files-found: error
