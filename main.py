@@ -1,8 +1,7 @@
-import json
 import tkinter as tk
-import unicodedata
-from pathlib import Path
 from tkinter import ttk
+
+import characters
 
 
 PAPER = "#f2f4f3"
@@ -17,30 +16,6 @@ DEEP = "#184f47"
 MONO = ("TkFixedFont", 10)
 SERIF = ("Georgia", 14)
 
-CATEGORIES = [
-    {"id": "basic", "name": "Basic Latin", "start": 0x20, "end": 0x7E},
-    {"id": "latin1", "name": "Latin-1 Supplement", "start": 0xA0, "end": 0xFF},
-    {"id": "greek", "name": "Greek & Coptic", "start": 0x370, "end": 0x3FF},
-    {"id": "cyrillic", "name": "Cyrillic", "start": 0x400, "end": 0x4FF},
-    {"id": "punctuation", "name": "Punctuation", "start": 0x2000, "end": 0x206F},
-    {"id": "currency", "name": "Currency", "start": 0x20A0, "end": 0x20CF},
-    {"id": "arrows", "name": "Arrows", "start": 0x2190, "end": 0x21FF},
-    {"id": "math", "name": "Math operators", "start": 0x2200, "end": 0x22FF},
-    {"id": "box", "name": "Box drawing", "start": 0x2500, "end": 0x257F},
-    {"id": "emoji", "name": "Emoji faces", "start": 0x1F600, "end": 0x1F64F},
-    {"id": "favorites", "name": "Favorites", "special": "favorites"},
-    {"id": "recent", "name": "Recently used", "special": "recent"},
-]
-
-
-def code_label(codepoint):
-    return f"U+{codepoint:04X}"
-
-
-def character_name(character):
-    return unicodedata.name(character, "UNNAMED CHARACTER").replace(" ", " ")
-
-
 class GlyphIndex:
     def __init__(self, root):
         self.root = root
@@ -49,18 +24,19 @@ class GlyphIndex:
         self.root.minsize(840, 620)
         self.root.configure(bg=PAPER)
 
-        self.active_category = CATEGORIES[0]
-        self.selected_codepoint = ord("A")
+        self.selected_character = "A"
         self.mode = tk.StringVar(value="copy")
         self.query = tk.StringVar()
-        self.favorites = self._load_favorites()
-        self.recent = []
+        self.favorites = characters.favorites()
+        self.recent = characters.recent()
+        default_set = "Recently used" if self.recent else "Basic Latin"
+        self.active_category = tk.StringVar(value=default_set)
         self.glyph_buttons = {}
         self.toast_job = None
 
         self._configure_styles()
         self._build_ui()
-        self._render_categories()
+        self._set_mode("copy")
         self._render_grid()
         self._render_selection()
 
@@ -103,11 +79,27 @@ class GlyphIndex:
         intro_copy.pack(side="left")
         ttk.Label(intro_copy, text="Character map", style="Heading.TLabel").pack(anchor="w")
         ttk.Label(intro_copy, text="Find a character. Put it where you need it.", style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
-        self.total_label = ttk.Label(intro, text="", foreground=DEEP, font=MONO)
+        collection_count = len(characters.SET_NAMES) - 2
+        searchable_count = len(characters.all_characters())
+        self.total_label = ttk.Label(
+            intro,
+            text=f"{collection_count} SETS · {searchable_count:,} CHARACTERS",
+            foreground=DEEP,
+            font=MONO,
+        )
         self.total_label.pack(side="right", anchor="s", pady=(0, 3))
 
         controls = tk.Frame(main, bg=PANEL, highlightbackground=INK, highlightthickness=1, padx=12, pady=10)
         controls.pack(fill="x", pady=(0, 13))
+        self.category_picker = ttk.Combobox(
+            controls,
+            textvariable=self.active_category,
+            values=characters.SET_NAMES,
+            state="readonly",
+            width=22,
+        )
+        self.category_picker.pack(side="left", padx=(0, 10))
+        self.category_picker.bind("<<ComboboxSelected>>", lambda _event: self._render_grid())
         search_wrap = tk.Frame(controls, bg="#f8faf9", highlightbackground=LINE, highlightthickness=1)
         search_wrap.pack(side="left", fill="x", expand=True, padx=(0, 14))
         tk.Label(search_wrap, text="⌕", bg="#f8faf9", fg=MUTED, font=("TkDefaultFont", 16)).pack(side="left", padx=(9, 2))
@@ -124,9 +116,8 @@ class GlyphIndex:
 
         workspace = tk.Frame(main, bg=PANEL, highlightbackground=INK, highlightthickness=1)
         workspace.pack(fill="both", expand=True)
-        workspace.grid_columnconfigure(1, weight=1)
+        workspace.grid_columnconfigure(0, weight=1)
         workspace.grid_rowconfigure(0, weight=1)
-        self._build_sidebar(workspace)
         self._build_browser(workspace)
         self._build_inspector(workspace)
 
@@ -134,17 +125,9 @@ class GlyphIndex:
         status = ttk.Label(main, textvariable=self.status, style="Muted.TLabel", anchor="w")
         status.pack(fill="x", pady=(7, 0))
 
-    def _build_sidebar(self, parent):
-        self.sidebar = tk.Frame(parent, bg="#e8eeeb", width=190, padx=10, pady=14, highlightbackground=INK, highlightthickness=0)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_propagate(False)
-        tk.Label(self.sidebar, text="BROWSE COLLECTION", bg="#e8eeeb", fg=MUTED, font=("TkFixedFont", 8)).pack(anchor="w", padx=8, pady=(0, 9))
-        self.category_container = tk.Frame(self.sidebar, bg="#e8eeeb")
-        self.category_container.pack(fill="both", expand=True)
-
     def _build_browser(self, parent):
         self.browser = tk.Frame(parent, bg=PANEL, padx=17, pady=15)
-        self.browser.grid(row=0, column=1, sticky="nsew")
+        self.browser.grid(row=0, column=0, sticky="nsew")
         self.browser.grid_columnconfigure(0, weight=1)
         self.browser.grid_rowconfigure(1, weight=1)
         heading = tk.Frame(self.browser, bg=PANEL)
@@ -155,14 +138,28 @@ class GlyphIndex:
         self.range_label.pack(anchor="w", pady=(3, 10))
         self.visible_label = tk.Label(heading, text="", bg=PANEL, fg=MUTED, font=("TkFixedFont", 8))
         self.visible_label.pack(anchor="e", pady=(0, 4))
-        self.grid_frame = tk.Frame(self.browser, bg=PANEL)
-        self.grid_frame.grid(row=1, column=0, sticky="new")
+        grid_area = tk.Frame(self.browser, bg=PANEL)
+        grid_area.grid(row=1, column=0, sticky="nsew")
+        grid_area.grid_rowconfigure(0, weight=1)
+        grid_area.grid_columnconfigure(0, weight=1)
+        self.grid_canvas = tk.Canvas(grid_area, bg=PANEL, bd=0, highlightthickness=0)
+        self.grid_canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(grid_area, orient="vertical", command=self.grid_canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.grid_canvas.configure(yscrollcommand=scrollbar.set)
+        self.grid_frame = tk.Frame(self.grid_canvas, bg=PANEL)
+        self.grid_window = self.grid_canvas.create_window((0, 0), window=self.grid_frame, anchor="nw")
+        self.grid_frame.bind("<Configure>", lambda _event: self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all")))
+        self.grid_canvas.bind("<Configure>", lambda event: self.grid_canvas.itemconfigure(self.grid_window, width=event.width))
+        self.grid_canvas.bind_all("<MouseWheel>", self._scroll_grid)
+        self.grid_canvas.bind_all("<Button-4>", self._scroll_grid)
+        self.grid_canvas.bind_all("<Button-5>", self._scroll_grid)
         for column in range(10):
             self.grid_frame.grid_columnconfigure(column, weight=1, uniform="glyph")
 
     def _build_inspector(self, parent):
         self.inspector = tk.Frame(parent, bg="#f8faf9", width=285, highlightbackground=INK, highlightthickness=1)
-        self.inspector.grid(row=0, column=2, sticky="nsew")
+        self.inspector.grid(row=0, column=1, sticky="nsew")
         self.inspector.grid_propagate(False)
         selected = tk.Frame(self.inspector, bg="#f8faf9", padx=15, pady=14)
         selected.pack(fill="x")
@@ -177,7 +174,7 @@ class GlyphIndex:
         meta.pack(fill="x", pady=(2, 0))
         self.selected_code = tk.Label(meta, text="", bg="#f8faf9", fg=INK, font=MONO)
         self.selected_code.pack(side="left", padx=7, pady=6)
-        self.selected_decimal = tk.Label(meta, text="", bg="#f8faf9", fg=MUTED, font=("TkFixedFont", 8))
+        self.selected_decimal = tk.Label(meta, text="", bg="#f8faf9", fg=MUTED, font=("TkFixedFont", 8), wraplength=170, justify="right")
         self.selected_decimal.pack(side="right", padx=7, pady=6)
         self.action_button = ttk.Button(selected, text="Copy character", style="Action.TButton", command=self._perform_primary_action)
         self.action_button.pack(fill="x", pady=(11, 0))
@@ -199,84 +196,33 @@ class GlyphIndex:
         self.character_count.pack(side="left")
         tk.Button(footer, text="Clear text", command=self._clear_text, bg=PANEL, fg=DEEP, relief="flat", cursor="hand2", font=("TkFixedFont", 8, "underline")).pack(side="right")
 
-    def _load_favorites(self):
-        path = Path.home() / ".config" / "glyph-index" / "favorites.json"
-        try:
-            values = json.loads(path.read_text(encoding="utf-8"))
-            return [int(value) for value in values if isinstance(value, int)]
-        except (OSError, ValueError, TypeError):
-            return []
-
-    def _save_favorites(self):
-        path = Path.home() / ".config" / "glyph-index" / "favorites.json"
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self.favorites), encoding="utf-8")
-        except OSError:
-            self.status.set("Could not save favorites")
-
-    def _characters_for(self, category):
-        if category.get("special") == "favorites":
-            return self.favorites[:]
-        if category.get("special") == "recent":
-            return self.recent[:]
-        result = []
-        for codepoint in range(category["start"], category["end"] + 1):
-            if unicodedata.category(chr(codepoint)) != "Cn":
-                result.append(codepoint)
-        return result
-
-    def _render_categories(self):
-        for child in self.category_container.winfo_children():
-            child.destroy()
-        for index, category in enumerate(CATEGORIES):
-            if index == 10:
-                tk.Frame(self.category_container, bg=LINE, height=1).pack(fill="x", padx=8, pady=9)
-            active = category["id"] == self.active_category["id"]
-            button = tk.Button(
-                self.category_container,
-                text=f'{category["name"]}  {len(self._characters_for(category))}',
-                command=lambda selected=category: self._select_category(selected),
-                anchor="w", padx=9, pady=7, relief="flat", bd=0, cursor="hand2",
-                bg=DEEP if active else "#e8eeeb", fg="#ffffff" if active else INK,
-                activebackground=DEEP if active else PANEL,
-                activeforeground="#ffffff" if active else INK,
-                font=("TkDefaultFont", 9),
-            )
-            button.pack(fill="x", pady=1)
-
-    def _select_category(self, category):
-        self.active_category = category
-        self._render_categories()
-        self._render_grid()
-
     def _render_grid(self):
         for child in self.grid_frame.winfo_children():
             child.destroy()
         self.glyph_buttons.clear()
-        points = self._characters_for(self.active_category)
         query = self.query.get().strip().lower()
         if query:
-            query_hex = query.removeprefix("u+")
-            points = [point for point in points if self._matches_search(point, query, query_hex)]
-        category = self.active_category
-        self.collection_title.configure(text=category["name"])
-        if "start" in category:
-            self.range_label.configure(text=f'{code_label(category["start"])}–{code_label(category["end"])}')
+            points = characters.search(query)
+            self.collection_title.configure(text="Search results")
+            self.range_label.configure(text="Unicode names and code points across all sets")
         else:
-            self.range_label.configure(text=f"{len(points)} saved characters")
+            set_name = self.active_category.get()
+            points = characters.characters_for(set_name, self.recent, self.favorites)
+            self.collection_title.configure(text=set_name)
+            self.range_label.configure(text=f"{len(points)} characters · hover for Unicode name")
         self.visible_label.configure(text=f"{len(points)} shown")
+        self.grid_canvas.yview_moveto(0)
         if not points:
             tk.Label(self.grid_frame, text="No characters match that search.", bg=PANEL, fg=MUTED, font=("TkDefaultFont", 10)).grid(row=0, column=0, columnspan=10, pady=38)
             return
-        for index, point in enumerate(points):
+        for index, shown in enumerate(points):
             row, column = divmod(index, 10)
-            character = chr(point)
-            active = point == self.selected_codepoint
+            code = " ".join(f"{ord(character):04X}" for character in characters.as_typed(shown))
+            active = shown == self.selected_character
             button = tk.Button(
                 self.grid_frame,
-                text=f"{character}\n{point:X}",
-                command=lambda selected=point: self._activate_character(selected),
+                text=f"{shown}\n{code}",
+                command=lambda selected=shown: self._activate_character(selected),
                 bg=YELLOW if active else PANEL,
                 fg=INK,
                 activebackground=MINT,
@@ -291,20 +237,23 @@ class GlyphIndex:
                 height=2,
             )
             button.grid(row=row, column=column, sticky="nsew", padx=2, pady=2)
-            button.bind("<Enter>", lambda _event, glyph=character, code=point: self.status.set(f"{character_name(glyph).title()} · {code_label(code)}"))
+            button.bind("<Enter>", lambda _event, glyph=shown: self.status.set(f"{characters.name(glyph)} · {characters.code_label(glyph)}"))
             button.bind("<Leave>", lambda _event: self.status.set("Ready"))
             button.bind("<KeyPress-Right>", lambda event, i=index: self._move_grid_focus(event, points, i, 1))
             button.bind("<KeyPress-Left>", lambda event, i=index: self._move_grid_focus(event, points, i, -1))
             button.bind("<KeyPress-Down>", lambda event, i=index: self._move_grid_focus(event, points, i, 10))
             button.bind("<KeyPress-Up>", lambda event, i=index: self._move_grid_focus(event, points, i, -10))
-            self.glyph_buttons[point] = button
+            self.glyph_buttons[shown] = button
 
-    def _matches_search(self, point, query, query_hex):
-        character = chr(point)
-        name = unicodedata.name(character, "").lower()
-        hexadecimal = f"{point:x}"
-        decimal = str(point)
-        return query in character.lower() or query in name or query_hex in hexadecimal or query in decimal
+    def _scroll_grid(self, event):
+        if getattr(event, "num", None) == 4:
+            units = -3
+        elif getattr(event, "num", None) == 5:
+            units = 3
+        else:
+            units = -1 if event.delta > 0 else 1
+        self.grid_canvas.yview_scroll(units, "units")
+        return "break"
 
     def _move_grid_focus(self, event, points, current, offset):
         next_index = current + offset
@@ -312,29 +261,28 @@ class GlyphIndex:
             self.glyph_buttons[points[next_index]].focus_set()
         return "break"
 
-    def _activate_character(self, codepoint):
-        self.selected_codepoint = codepoint
-        self.recent = [point for point in self.recent if point != codepoint]
-        self.recent.insert(0, codepoint)
-        self.recent = self.recent[:24]
+    def _activate_character(self, shown):
+        self.selected_character = shown
+        self.recent = [character for character in self.recent if character != shown]
+        self.recent.insert(0, shown)
+        self.recent = self.recent[:characters.RECENT_LIMIT]
+        characters.remember(shown)
         self._render_selection()
-        button = self.glyph_buttons.get(codepoint)
+        button = self.glyph_buttons.get(shown)
         if button:
             button.configure(bg=YELLOW, bd=2)
         if self.mode.get() == "copy":
             self._copy_character()
         else:
             self._insert_character()
-        if self.active_category.get("special") == "recent":
+        if self.active_category.get() == "Recently used" and not self.query.get().strip():
             self._render_grid()
-        self._render_categories()
 
     def _render_selection(self):
-        character = chr(self.selected_codepoint)
-        self.selected_glyph.configure(text=character)
-        self.selected_code.configure(text=code_label(self.selected_codepoint))
-        self.selected_decimal.configure(text=f"Decimal {self.selected_codepoint}")
-        favorite = self.selected_codepoint in self.favorites
+        self.selected_glyph.configure(text=self.selected_character)
+        self.selected_code.configure(text=characters.code_label(self.selected_character))
+        self.selected_decimal.configure(text=characters.name(self.selected_character))
+        favorite = self.selected_character in self.favorites
         self.favorite_button.configure(text="★" if favorite else "☆", bg="#ffe1d9" if favorite else PANEL, fg="#b35335" if favorite else INK, command=self._toggle_favorite)
         self.action_button.configure(text="Copy character" if self.mode.get() == "copy" else "Insert at cursor")
 
@@ -342,40 +290,39 @@ class GlyphIndex:
         self.mode.set(mode)
         self.copy_mode_button.configure(style="Mode.TButton" if mode != "copy" else "Selected.Mode.TButton")
         self.insert_mode_button.configure(style="Mode.TButton" if mode != "insert" else "Selected.Mode.TButton")
-        self.root.style = ttk.Style(self.root)
-        self.root.style.configure("Selected.Mode.TButton", background=INK, foreground="#ffffff", padding=(12, 8))
-        self.root.style.map("Selected.Mode.TButton", background=[("active", INK)])
+        style = ttk.Style(self.root)
+        style.configure("Selected.Mode.TButton", background=INK, foreground="#ffffff", padding=(12, 8))
+        style.map("Selected.Mode.TButton", background=[("active", INK)])
         self._render_selection()
         self._render_grid()
 
     def _toggle_favorite(self):
-        if self.selected_codepoint in self.favorites:
-            self.favorites.remove(self.selected_codepoint)
+        if self.selected_character in self.favorites:
+            self.favorites.remove(self.selected_character)
         else:
-            self.favorites.insert(0, self.selected_codepoint)
-        self._save_favorites()
-        self._render_categories()
+            self.favorites.insert(0, self.selected_character)
+        characters.save_favorites(self.favorites)
         self._render_selection()
-        if self.active_category.get("special") == "favorites":
+        if self.active_category.get() == "Favorites" and not self.query.get().strip():
             self._render_grid()
 
     def _copy_character(self):
-        character = chr(self.selected_codepoint)
+        character = characters.as_typed(self.selected_character)
         try:
             self.root.clipboard_clear()
             self.root.clipboard_append(character)
             self.root.update()
-            self._notify(f"Copied {code_label(self.selected_codepoint)}")
+            self._notify(f"Copied {characters.code_label(self.selected_character)}")
         except tk.TclError:
             self._notify("Could not access the system clipboard")
 
     def _insert_character(self):
-        character = chr(self.selected_codepoint)
+        character = characters.as_typed(self.selected_character)
         try:
             self.compose_text.insert("insert", character)
             self.compose_text.focus_set()
             self._update_character_count()
-            self._notify(f"Inserted {code_label(self.selected_codepoint)}")
+            self._notify(f"Inserted {characters.code_label(self.selected_character)}")
         except tk.TclError:
             self._notify("Could not insert the selected character")
 
