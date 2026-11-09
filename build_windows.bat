@@ -9,7 +9,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-py -3 -m pip install --upgrade pyinstaller
+py -3 -m pip install --upgrade pyinstaller -r requirements.txt
 if errorlevel 1 goto build_failed
 
 py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name EctypeCharmap main.py

@@ -1,159 +1,179 @@
+"""Special characters, as in Ectype OCR's character pane: sets of the characters scholarly
+books use and keyboards lack, a search by Unicode name, the ones used last, and favorites.
+
+A combining mark (a Hebrew point, a macron to set over a letter) is shown on a dotted circle
+(◌) so it can be seen; the circle is never copied.
+"""
+
+from __future__ import annotations
+
 import json
 import os
+import sys
 import unicodedata
 from pathlib import Path
 
+RECENT_MAX = 24
 
-RECENT_LIMIT = 24
-DISPLAY_CIRCLE = "◌"
+def _chars(*parts: str) -> list[str]:
+    """The characters of the strings, split into letters with their marks (p̄), in order, once each."""
+    out: list[str] = []
+    for part in parts:
+        for c in part.split() if " " in part else _clusters(part):
+            if c not in out:
+                out.append(c)
+    return out
 
-COLLECTIONS = {
-    "Basic Latin": [(0x20, 0x7E)],
-    "Latin & diacritics": [(0xA0, 0x024F), (0x1E00, 0x1EFF), (0x2C60, 0x2C7F), (0xA720, 0xA7FF)],
-    "IPA & phonetics": [(0x0250, 0x02FF), (0x1D00, 0x1D7F)],
-    "Greek": [(0x0370, 0x03FF), (0x1F00, 0x1FFF)],
-    "Cyrillic": [(0x0400, 0x052F), (0x2DE0, 0x2DFF), (0xA640, 0xA69F)],
-    "Hebrew": [(0x0590, 0x05FF)],
-    "Combining marks": [(0x0300, 0x036F), (0x1AB0, 0x1AFF), (0x1DC0, 0x1DFF), (0x20D0, 0x20FF), (0xFE20, 0xFE2F)],
-    "Superscripts & subscripts": [(0x2070, 0x209F), (0x1D2C, 0x1D7F)],
-    "Punctuation": [(0x2000, 0x206F), (0x2E00, 0x2E7F)],
-    "Currency & letterlike": [(0x20A0, 0x20CF), (0x2100, 0x214F)],
-    "Math operators": [(0x2200, 0x22FF), (0x2A00, 0x2AFF)],
-    "Arrows": [(0x2190, 0x21FF), (0x27F0, 0x27FF), (0x2900, 0x297F)],
-    "Box drawing & blocks": [(0x2500, 0x259F)],
-    "Japanese": [(0x3000, 0x30FF), (0x31F0, 0x31FF)],
-    "Symbols & emoji": [(0x2600, 0x27BF), (0x1F300, 0x1F5FF), (0x1F600, 0x1F64F), (0x1F680, 0x1F6FF), (0x1F900, 0x1F9FF), (0x1FA70, 0x1FAFF)],
+
+def _clusters(text: str) -> list[str]:
+    out: list[str] = []
+    for c in text:
+        if out and unicodedata.combining(c) and not unicodedata.combining(out[-1][0]) and out[-1] != " ":
+            out[-1] += c
+        else:
+            out.append(c)
+    return out
+
+
+def _range(a: int, b: int) -> str:
+    return "".join(chr(c) for c in range(a, b + 1) if unicodedata.name(chr(c), ""))
+
+
+SETS: dict[str, list[str]] = {
+    "Superscripts": _chars("¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁰ ⁺ ⁻ ⁼ ⁽ ⁾ ᵃ ᵇ ᶜ ᵈ ᵉ ᶠ ᵍ ʰ ⁱ ʲ ᵏ ˡ ᵐ ⁿ ᵒ ᵖ ʳ ˢ ᵗ ᵘ ᵛ ʷ ˣ ʸ ᶻ "
+                           "ᴬ ᴮ ᴰ ᴱ ᴳ ᴴ ᴵ ᴶ ᴷ ᴸ ᴹ ᴺ ᴼ ᴾ ᴿ ᵀ ᵁ ᵂ ₀ ₁ ₂ ₃ ₄ ₅ ₆ ₇ ₈ ₉"),
+    "Transliteration": _chars("ʾ ʿ ḥ Ḥ ṭ Ṭ ṣ Ṣ š Š ś Ś ḇ Ḇ ḡ Ḡ ḏ Ḏ ḵ Ḵ p̄ P̄ ṯ Ṯ ḳ Ḳ ḫ Ḫ ẓ Ẓ ḍ Ḍ ġ Ġ ǧ Ǧ ž ż "
+                              "ā Ā ē Ē ī Ī ō Ō ū Ū â Â ê Ê î Î ô Ô û Û ă Ă ĕ Ĕ ĭ ŏ Ŏ ŭ ə Ə ᵉ ᵃ ᵒ ʼ ʻ ʽ"),
+    "Accented Latin": _chars("á à â ä ã å ā ă ą ç ć č ď é è ê ë ē ĕ ė ę ě ğ ģ í ì î ï ī ĭ į ı ķ ĺ ļ ľ ł ñ ń ņ ň "
+                             "ó ò ô ö õ ø ō ŏ ő ŕ ř ś ş š ș ť ţ ț ú ù û ü ũ ū ŭ ů ű ų ý ÿ ź ż ž ß æ œ ð þ ŋ "
+                             "Á À Â Ä Ã Å Ā Ç Č É È Ê Ë Ē Í Ì Î Ï Ī Ñ Ó Ò Ô Ö Õ Ø Ō Ř Š Ú Ù Û Ü Ū Ý Ž Æ Œ Ð Þ"),
+    "Combining marks": _chars(" ".join("◌" + chr(c) for c in (0x0300, 0x0301, 0x0302, 0x0303, 0x0304, 0x0306, 0x0307,
+                                                               0x0308, 0x030A, 0x030C, 0x0323, 0x0324, 0x0325, 0x0327,
+                                                               0x0328, 0x032E, 0x0331, 0x0329, 0x032F, 0x0342, 0x0313, 0x0314))),
+    "IPA": _chars(" ".join(_range(0x0250, 0x02AF)) + " θ β χ ː ˑ ˈ ˌ ʰ ʷ ʲ ˤ ˠ"),
+    "Greek": _chars("α β γ δ ε ζ η θ ι κ λ μ ν ξ ο π ρ σ ς τ υ φ χ ψ ω Α Β Γ Δ Ε Ζ Η Θ Ι Κ Λ Μ Ν Ξ Ο Π Ρ Σ Τ Υ Φ Χ Ψ Ω "
+                    "ἀ ἁ ἄ ἅ ἂ ἃ ἆ ἇ ά ὰ ᾶ ᾳ ᾴ ᾷ ἐ ἑ ἔ ἕ ἒ ἓ έ ὲ ἠ ἡ ἤ ἥ ἢ ἣ ἦ ἧ ή ὴ ῆ ῃ ῄ ῇ ᾐ ᾑ ᾖ ᾗ "
+                    "ἰ ἱ ἴ ἵ ἲ ἳ ἶ ἷ ί ὶ ῖ ϊ ΐ ὀ ὁ ὄ ὅ ὂ ὃ ό ὸ ὐ ὑ ὔ ὕ ὒ ὓ ὖ ὗ ύ ὺ ῦ ϋ ΰ "
+                    "ὠ ὡ ὤ ὥ ὢ ὣ ὦ ὧ ώ ὼ ῶ ῳ ῴ ῷ ᾠ ᾡ ᾦ ᾧ ῤ ῥ Ἀ Ἁ Ἐ Ἑ Ἠ Ἡ Ἰ Ἱ Ὀ Ὁ Ὑ Ὠ Ὡ Ῥ · ; ʹ ͵"),
+    "Hebrew": _chars("א ב ג ד ה ו ז ח ט י כ ך ל מ ם נ ן ס ע פ ף צ ץ ק ר ש ת "
+                     + " ".join("◌" + chr(c) for c in list(range(0x05B0, 0x05BE)) + [0x05BF, 0x05C1, 0x05C2, 0x05C4,
+                                                                                    0x05C5, 0x05C7])
+                     + " ־ ׀ ׃ ׆ ׳ ״"),
+    "Hebrew accents": _chars(" ".join("◌" + chr(c) for c in range(0x0591, 0x05B0))),
+    # Transcribing manuscripts (Leiden conventions): [lost] ⟨added by the editor⟩ (abbreviation
+    # expanded) {superfluous} ⟦erased by the scribe⟧ \inserted above/ , ⸢damaged⸣, and a dot
+    # under a letter read uncertainly.
+    "Editorial marks": _chars("[ ] ⟨ ⟩ ( ) { } ⟦ ⟧ \\ / ⸢ ⸣ ◌\u0323 ◌\u0307 ‹ › ⁅ ⁆ ⸂ ⸃ ° ※ ·"),
+    "Punctuation": _chars("— – ‐ ‘ ’ ‚ “ ” „ « » ‹ › † ‡ § ¶ · • … ′ ″ ‰ ° × ÷ ± ¬ ¦ ⸀ ⸁ ⸂ ⸃ ⸄ ⸅ ℵ ℶ"),
 }
 
-SET_NAMES = ["Recently used", *COLLECTIONS, "Favorites"]
-SEARCH_RANGES = [bounds for ranges in COLLECTIONS.values() for bounds in ranges]
-SEARCH_RANGES += [(0x1E00, 0x1EFF), (0x2C60, 0x2C7F), (0xA720, 0xA7FF), (0x1F00, 0x1FFF)]
+SET_NAMES = ["Recently used", *SETS, "Favorites"]
 
 
-def as_typed(shown):
-    return shown.replace(DISPLAY_CIRCLE, "")
+def as_typed(shown: str) -> str:
+    """What a pane character inserts: a combining mark without the dotted circle it is shown on."""
+    return shown.replace("◌", "")
 
 
-def _shown_character(character):
-    if unicodedata.category(character).startswith("M"):
-        return DISPLAY_CIRCLE + character
-    return character
+def name(shown: str) -> str:
+    """The character's Unicode name(s), for its tooltip."""
+    return " + ".join(unicodedata.name(c, f"U+{ord(c):04X}").title() for c in as_typed(shown)) or shown
 
 
-def code_label(shown):
-    return " + ".join(f"U+{ord(character):04X}" for character in as_typed(shown))
-
-
-def name(shown):
-    names = [unicodedata.name(character, f"U+{ord(character):04X}").title() for character in as_typed(shown)]
-    return " + ".join(names) or "Unnamed character"
-
-
-def _characters_in_ranges(ranges):
-    result = []
-    seen = set()
-    for start, end in ranges:
-        for codepoint in range(start, end + 1):
-            character = chr(codepoint)
-            if unicodedata.name(character, ""):
-                shown = _shown_character(character)
-                if shown not in seen:
-                    result.append(shown)
-                    seen.add(shown)
-    return result
-
-
-def all_characters():
-    return _characters_in_ranges(SEARCH_RANGES)
-
-
-def characters_for(set_name, recent_values=None, favorite_values=None):
-    if set_name == "Recently used":
-        return list(recent_values or [])
-    if set_name == "Favorites":
-        return list(favorite_values or [])
-    return _characters_in_ranges(COLLECTIONS[set_name])
-
-
-def search(query, limit=500):
-    words = query.casefold().split()
+def search(query: str, limit: int = 300) -> list[str]:
+    """Characters whose Unicode name has every word of the query ("dot below", "macron h",
+    "superscript two"), from the sets first, then from the blocks scholarly books draw on."""
+    words = query.upper().split()
     if not words:
         return []
-    results = []
-    for shown in all_characters():
-        character_name = name(shown).casefold()
-        raw = as_typed(shown)
-        code = " ".join(f"u+{ord(character):04x}" for character in raw)
-        literal = shown.casefold()
-        if (all(word in character_name for word in words)
-                or query.casefold() in code
-                or query.casefold() in literal):
-            results.append(shown)
-            if len(results) >= limit:
+    seen, out = set(), []
+    pool = [c for chars in SETS.values() for c in chars]
+    blocks = [(0x00A0, 0x024F), (0x0250, 0x02FF), (0x0300, 0x036F), (0x0370, 0x03FF), (0x0590, 0x05FF),
+              (0x1D00, 0x1DBF), (0x1E00, 0x1EFF), (0x1F00, 0x1FFF), (0x2000, 0x209F), (0x2C60, 0x2C7F), (0x2E00, 0x2E4F)]
+    for a, b in blocks:
+        for code in range(a, b + 1):
+            c = chr(code)
+            if unicodedata.name(c, ""):
+                pool.append("◌" + c if unicodedata.combining(c) else c)
+    for shown in pool:
+        if shown in seen:
+            continue
+        seen.add(shown)
+        if all(w in name(shown).upper() for w in words):
+            out.append(shown)
+            if len(out) >= limit:
                 break
-    return results
+    return out
 
 
-def _data_directory():
+
+def code_label(shown: str) -> str:
+    """The character's code point(s): U+0101, or U+0070 + U+0304 for p̄."""
+    return " + ".join(f"U+{ord(c):04X}" for c in as_typed(shown))
+
+
+def data_dir() -> Path:
+    """Where recent characters and favorites are kept."""
+    home = Path.home()
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", home)) / "Ectype Charmap"
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Ectype Charmap"
+    return Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / "ectype-charmap"
+
+
+def _legacy_paths() -> list[Path]:
+    """Where earlier versions kept characters.json (the "Glyph Index" folder)."""
+    paths = []
     if os.name == "nt" and os.environ.get("APPDATA"):
-        return Path(os.environ["APPDATA"]) / "Glyph Index"
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "glyph-index"
+        paths.append(Path(os.environ["APPDATA"]) / "Glyph Index" / "characters.json")
+    paths.append(Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "glyph-index" / "characters.json")
+    return paths
 
 
-def _read_list(path, key):
+def _path() -> Path:
+    return data_dir() / "characters.json"
+
+
+def _load() -> dict:
+    for path in [_path(), *_legacy_paths()]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def _save(data: dict) -> None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return []
-    if isinstance(data, dict):
-        values = data.get(key, [])
-    elif key == "favorites" and isinstance(data, list):
-        values = data
-    else:
-        values = []
-    result = []
-    for value in values:
-        if isinstance(value, int) and 0 <= value <= 0x10FFFF:
-            result.append(_shown_character(chr(value)))
-        elif isinstance(value, str):
-            result.append(value)
-    return result
-
-
-def recent():
-    return _read_list(_data_directory() / "characters.json", "recent")[:RECENT_LIMIT]
-
-
-def remember(shown):
-    path = _data_directory() / "characters.json"
-    values = [shown, *[value for value in recent() if value != shown]][:RECENT_LIMIT]
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"recent": values}, ensure_ascii=False), encoding="utf-8")
+        _path().parent.mkdir(parents=True, exist_ok=True)
+        _path().write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
 
 
-def favorites():
-    path = _data_directory() / "characters.json"
-    values = _read_list(path, "favorites")
-    if values:
-        return values
-    legacy = Path.home() / ".config" / "glyph-index" / "favorites.json"
-    return _read_list(legacy, "favorites")
+def _strings(values) -> list[str]:
+    return [c for c in values if isinstance(c, str) and c] if isinstance(values, list) else []
 
 
-def save_favorites(values):
-    path = _data_directory() / "characters.json"
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            data = {}
-    except (OSError, ValueError, TypeError):
-        data = {}
-    data["favorites"] = values
-    try:
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    except OSError:
-        pass
+def recent() -> list[str]:
+    """The characters used last, most recent first."""
+    return _strings(_load().get("recent"))[:RECENT_MAX]
+
+
+def remember(shown: str) -> None:
+    data = _load()
+    data["recent"] = ([shown] + [c for c in recent() if c != shown])[:RECENT_MAX]
+    _save(data)
+
+
+def favorites() -> list[str]:
+    return _strings(_load().get("favorites"))
+
+
+def save_favorites(values: list[str]) -> None:
+    data = _load()
+    data["favorites"] = list(values)
+    _save(data)
